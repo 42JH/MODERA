@@ -158,7 +158,7 @@ OCR 이 비었거나 정보성이 없다고 판정되면 분석을 건너뛰고 
 | — | POST | `/internal/v1/search/related` | 동기. 연관 이미지(1장 기준 인근 검색). 아래 참고 |
 | — | POST | `/internal/v1/documents/candidates` | 동기. 문서화 이미지 선택(N장 누적 → 다음 후보). 아래 참고 |
 | — | POST | `/internal/v1/documents` | 동기. Spring 이 보낸 분석 결과 여러 건 → 마크다운 문서 |
-| — | POST | `/internal/v1/categories/reanalyze` | 동기. 카테고리 재분석(거부한 카테고리 배제, 최대 5회). [docs/CATEGORY_REANALYZE.md](docs/CATEGORY_REANALYZE.md) |
+| — | POST | `/internal/v1/categories/reanalyze` | 동기. 카테고리 재분석(거부한 카테고리 배제, 최대 5회). [docs/CATEGORY_REANALYZE.md](ai_main/docs/CATEGORY_REANALYZE.md) |
 | — | GET | `/health` | 헬스체크 (토큰 불필요) |
 
 FastAPI 가 호출하는 쪽: 10-4 콜백, 10-5 지식 후보 조회.
@@ -196,12 +196,12 @@ worker 의 `AnalysisCallbackService` 가 읽는 키입니다. `status` 는 `COMP
 `FULL` 요청에는 OCR 이 실려 오지 않으므로(worker 가 `input.image` 만 보냄) 이미지
 분석을 먼저 돌려 거기서 읽어낸 텍스트를 OCR 대용으로 씁니다. `input.ocr` 이 오면 그게 우선입니다.
 
-로컬에서 worker 와 붙여 돌리는 절차는 **[LOCAL_DEV.md](LOCAL_DEV.md)** 를 보세요
+로컬에서 worker 와 붙여 돌리는 절차는 **[LOCAL_DEV.md](ai_main/LOCAL_DEV.md)** 를 보세요
 (`MOCK_AI=true` 로 Gemini 키 없이 띄우는 법 포함).
 
 ## 문서화 (`POST /internal/v1/documents`)
 
-> 전체 필드·에러 코드·Spring 연동 유의사항은 **[docs/DOCUMENT_API.md](docs/DOCUMENT_API.md)** 에 명세서 형식으로 정리했다. 아래는 요약이다.
+> 전체 필드·에러 코드·Spring 연동 유의사항은 **[docs/DOCUMENT_API.md](ai_main/docs/DOCUMENT_API.md)** 에 명세서 형식으로 정리했다. 아래는 요약이다.
 
 분석이 끝난 이미지 여러 장을 묶어 하나의 마크다운 문서로 만듭니다.
 분석 파이프라인과 별개 기능입니다 — 새 단계를 추가하지 않습니다.
@@ -386,7 +386,7 @@ scripts/
 
 FastAPI 가 색인·검색을 전담한다. AGENT 단계가 끝나면 요약·태그·카테고리·OCR
 원문을 색인하고, `/internal/v1/search` 로 BM25 키워드 검색을 제공한다.
-구조·운영 주의사항은 **[OPENSEARCH.md](OPENSEARCH.md)** 에 따로 정리했다(인프라 참고용).
+구조·운영 주의사항은 **[OPENSEARCH.md](ai_main/OPENSEARCH.md)** 에 따로 정리했다(인프라 참고용).
 
 한글 품질을 위해 **nori** 형태소 분석기를 쓰므로 플러그인이 설치된 이미지가 필요하다
 (`opensearch.Dockerfile` 참고). 로컬/시연은 `docker-compose up -d` 로 nori 포함
@@ -493,12 +493,9 @@ POST /internal/v1/documents/candidates   X-Internal-Token: <공유 토큰>
 - 이 엔드포인트는 **문서를 만들지 않는다.** 선택이 끝나면 Spring 이 그 id 들로
   `POST /internal/v1/documents` 를 부른다.
 
-**모듈 경계.** 화면 계약(`imageIds`·상한·`selectedImageIds`)은
-[app/doc_selection.py](app/doc_selection.py) 가 들고, 검색·중심 벡터·사용자 격리는
-[app/related.py](app/related.py) 의 `similar_images` **하나만** 쓴다. kNN 질의와
-격리 필터를 복사하면 한쪽에서만 `user_id` 필터가 빠지는 사고가 난다.
-점검: `python test/test_doc_selection.py`,
-결과 기록 [test/results/test_doc_selection.md](test/results/test_doc_selection.md).
+> 이 엔드포인트와 연관 이미지 엔드포인트(`/internal/v1/search/related`)는 2026-08-09 에
+> 제거됐다(`app/related.py`·`app/doc_selection.py` 삭제, 8a8d13f6). 연관 이미지·문서화 추천은
+> Spring analysis-worker 의 pgvector 구현이 맡는다.
 
 ### 사용자 격리 (위 두 API 공통)
 
@@ -521,20 +518,9 @@ POST /internal/v1/documents/candidates   X-Internal-Token: <공유 토큰>
 소유자(`search.SEED_USER_ID`)로 쓰는 값이다. `FIXED_USER_ID=0` 은 "고정 해제"
 (요청 값 사용)를 의미하고, 그때부터 이 필터가 유일한 격리 장치다.
 
-두 기능 다 **파일 하나 + `main.py` 의 `include_router` 한 줄**이 전부다.
-`search.py`·`schemas.py` 는 안 닿는다 — 머지 충돌을 피하려는 의도이고, 되돌릴 때도
-그 파일과 한 줄만 지우면 된다.
-
-| 기능 | 모듈 | 점검 | 결과 기록 |
-| --- | --- | --- | --- |
-| 연관 이미지 + 인근 검색 코어 | [app/related.py](app/related.py) | `python test/test_related.py` | [test/results/test_related.md](test/results/test_related.md) |
-| 문서화 이미지 선택 | [app/doc_selection.py](app/doc_selection.py) | `python test/test_doc_selection.py` | [test/results/test_doc_selection.md](test/results/test_doc_selection.md) |
-
-둘 다 OpenSearch 없이 돈다(가짜 클라이언트는 `test/fakes.py` 하나를 공유한다).
-
 ## 팀 확인이 필요한 사항
 
-1. **카테고리 대표 벡터.** AI 서버가 카테고리별 centroid 를 OpenSearch `{OPENSEARCH_INDEX}_categories` 인덱스에 직접 유지합니다(판정된 카테고리에 그 이미지의 요약 임베딩을 누적 평균으로 반영). 서버를 재기동해도 카테고리와 벡터가 남고, 이미지가 쌓일수록 정확해집니다. 기본 13종 이름 벡터는 기동 시 전역 시드(`user_id=0`)로 심습니다. 10-5 응답에 `representativeVector` 가 오면 그쪽을 우선 씁니다(스키마는 이미 준비돼 있음) — 백엔드가 pgvector centroid 를 유지한다면 어느 쪽을 정본으로 볼지 합의가 필요합니다. **추가 카테고리 벡터는 2026-08-06 에 "이름만 공유, centroid 는 개인화" 로 확정했습니다** — 타 사용자 카테고리의 이름만 후보로 빌려오고(이름 terms 집계라 문서 본문을 읽지 않습니다) centroid 는 사용자별로 격리합니다. 근거와 구현 지점은 [docs/CATEGORY_VECTOR_STORE.md](docs/CATEGORY_VECTOR_STORE.md) 참고.
+1. **카테고리 대표 벡터.** AI 서버가 카테고리별 centroid 를 OpenSearch `{OPENSEARCH_INDEX}_categories` 인덱스에 직접 유지합니다(판정된 카테고리에 그 이미지의 요약 임베딩을 누적 평균으로 반영). 서버를 재기동해도 카테고리와 벡터가 남고, 이미지가 쌓일수록 정확해집니다. 기본 13종 이름 벡터는 기동 시 전역 시드(`user_id=0`)로 심습니다. 10-5 응답에 `representativeVector` 가 오면 그쪽을 우선 씁니다(스키마는 이미 준비돼 있음) — 백엔드가 pgvector centroid 를 유지한다면 어느 쪽을 정본으로 볼지 합의가 필요합니다. **추가 카테고리 벡터는 2026-08-06 에 "이름만 공유, centroid 는 개인화" 로 확정했습니다** — 타 사용자 카테고리의 이름만 후보로 빌려오고(이름 terms 집계라 문서 본문을 읽지 않습니다) centroid 는 사용자별로 격리합니다. 근거와 구현 지점은 [docs/CATEGORY_VECTOR_STORE.md](ai_main/docs/CATEGORY_VECTOR_STORE.md) 참고.
 2. **기본 카테고리 위치.** 쌓인 카테고리가 하나도 없을 때(콜드 스타트) `stages.DEFAULT_CATEGORIES` 17개를 후보로 씁니다. 원칙적으로는 Spring DB 시드로 옮기는 편이 낫습니다.
 3. **`categoryCreated` 필드.** AGENT 결과에 신규 카테고리 여부를 담았습니다. 명세에 없는 필드라 Spring 과 합의가 필요합니다(불필요하면 제거).
 3-1. **`documentVector` 필드.** AGENT 결과에 검색용 문서 임베딩(요약 기준, `DOCUMENT`)을 함께 실어 보냅니다. Spring 은 콜백 한 번으로 메타데이터와 벡터를 같이 받아 pgvector 등에 적재하면 됩니다(임베딩 재호출 불필요). `embeddingModel`·`embeddingDimension` 도 함께 넘어가니 벡터 컬럼 차원과 일치하는지 확인이 필요합니다. 명세 밖 필드라 Spring 과 계약 확정이 필요합니다.
