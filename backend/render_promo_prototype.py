@@ -1,10 +1,10 @@
-import math, os, random, subprocess, sys, wave
+import math, os, random, shutil, subprocess, sys, wave
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "output" / "promo-prototype"
-SHEET = OUT / "mascot-storyboard.png"
+SHEET = ROOT / "assets" / "mascot-storyboard.png"
 W, H, FPS, OUTPUT_FPS, DURATION = 1920, 1080, 15, 30, 35
 NAVY, MUSTARD, WHITE = "#1A2338", "#D4A62A", "#F5F2E9"
 
@@ -104,7 +104,8 @@ def make_audio(path):
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(b''.join(x.to_bytes(2,'little',signed=True) for x in data))
 
 def main():
-    ffmpeg=str(ROOT/'.video-deps'/'imageio_ffmpeg'/'binaries'/'ffmpeg-win-x86_64-v7.1.exe')
+    ffmpeg=shutil.which('ffmpeg') or sys.exit('ffmpeg를 찾을 수 없습니다. 설치 후 PATH에 추가하세요.')
+    OUT.mkdir(parents=True, exist_ok=True)
     sheet=Image.open(SHEET).convert('RGB'); sw,sh=sheet.size; panels=[]
     for r in range(3):
         for c in range(2): panels.append(sheet.crop((c*sw//2,r*sh//3,(c+1)*sw//2,(r+1)*sh//3)))

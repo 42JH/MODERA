@@ -100,3 +100,8 @@ ai/ai_main/test/
 *firebase-adminsdk*.json
 *service-account*.json
 /backend/ops/k6/generated/
+
+# ── 생성 산출물 ──
+backend/output/
+.video-deps/
+.kotlin/
